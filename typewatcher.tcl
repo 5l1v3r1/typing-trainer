@@ -1,40 +1,50 @@
 package require Tk
 
 
+set errorResolution 20.0
+set timeStep 250
 set sideBarHeight 500
 set sideBarWidth 300
 
-set barH 10
-set bars [list [list 10 "red" 10] [list 20 "green" 10] [list 30 "green" 10] [list 40 "green" 10]]
-
-
-for {set i 0} {$i < 80} {incr i} {
+for {set i 0} {$i < 81} {incr i} {
     set count [expr 6*$i]
     lappend bars  [list $count "green" 6]
 }
 
+for {set i 0} {$i < 81} {incr i} {
+    set count [expr 6*$i]
+    lappend bars2  [list $count "red" 6]
+}
 
 
-proc updateBar {bar barNumber percent lbl} {
-    global $bar
-
-    lassign [lindex $::bars $barNumber] location color h
-    catch {.c delete [set [set bar]]}
-    set [set bar] [.c create rectangle [expr {$::sideBarWidth - 1}] $location [expr {$::sideBarWidth - int(1.0 * $percent * $::sideBarWidth)}] [expr {$location + $h}] -fill $color]
+proc updateBar {barNumber percent lbl} {
+    lassign [lindex $::bars $barNumber] y color h
+    .c delete  "wpmBar$barNumber"
+    .c create rectangle [expr {$::sideBarWidth - 1}] $y [expr {$::sideBarWidth - int($percent * $::sideBarWidth)}] [expr {$y + $h}] -fill $color -tags "wpmBar$barNumber"
 
     if {[expr {$barNumber % 10}] == 0} {
-        catch {.c delete "wpmLabel$barNumber"} 
-        .c create text 5  [expr {$location + $h/2}] -text [expr {int($lbl)}] -tags "wpmLabel$barNumber" -fill white -font "Arial 14" -anchor w
+        catch {.c delete "wpmLabel$barNumber"}
+        .c create text 5  [expr {$y + $h/2}] -text [expr {int($lbl)}] -tags "wpmLabel$barNumber" -fill white -font "Arial 14" -anchor w
+    }
+}
+
+proc updateErrorSubBar {barNumber percent lbl} {
+    lassign [lindex $::bars2 $barNumber] y color h
+    .c2 delete  "errorBar$barNumber"
+    .c2 create rectangle 0 $y [expr {int(1.0 * $percent * $::sideBarWidth)}] [expr {$y + $h}] -fill $color -tags "errorBar$barNumber"
+    if {[expr {$barNumber % 10}] == 0} {
+        catch {.c2 delete "errorLabel$barNumber"} 
+        .c2 create text [expr $::sideBarWidth - 5]  [expr {$y + $h/2}] -text [expr {int($lbl)}] -tags "wpmLabel$barNumber" -fill white -font "Arial 14" -anchor e -tags "errorLabel$barNumber"
     }
 }
 
 
+
 proc setGreen {} {
     .t tag add yellow "1.1 + $::currntCharIndex char" "1.2 + $::currntCharIndex char"
-    .t tag add green "1.0 + $::currntCharIndex char" "1.1 + $::currntCharIndex char"
     .t configure -background "white"
     .t yview -pickplace "1.0 + [expr $::currntCharIndex + 200] char"
-    .t yview -pickplace "1.0 + [expr $::currntCharIndex - 200] char"
+    .t yview -pickplace "1.0 + [expr $::currntCharIndex] char"
 }
 
 proc recomputeRhyme {{in -1}} {
@@ -55,81 +65,71 @@ proc recomputeRhyme {{in -1}} {
 
     set total 0
     foreach diff $::delayDiffs {incr total $diff}
-    set ::rhyme [expr {$total / [llength $::delayDiffs] / 600.0}]
+    set ::rhyme [expr {$total / [llength $::delayDiffs]}]
    
     if {$in == -1} {
         set ::delayDiffs [lreplace $::delayDiffs end end]
     }
+
+    .c3 delete $::rhymeBarRight
+    .c3 delete $::rhymeBarLeft
+    set ::rhymeBarRight [.c3 create rectangle 500 25 [expr {500 + $::rhyme / 2}] 75 -fill "yellow"]
+    set ::rhymeBarLeft [.c3 create rectangle 500 25 [expr {500 - $::rhyme / 2}] 75 -fill "yellow"]
     
-    #updateBar rhymeMeter 0 $::rhyme
 }
 
-
-proc recomputeLLWPM {{timestamp -1}} {
-    if {$timestamp == -1} {set timestamp [clock milliseconds]}
-    set limit [expr {$timestamp - 60000}]
-    for {set i 0} {$i < [llength $::wpmLog2]} {incr i} {
-        if {[lindex $::wpmLog2 $i] < $limit} {
-            set ::wpmLog2 [lreplace $::wpmLog2 $i $i]
-            incr i -1
-        } else {
-            break
-        }
-    }
-
-    set ::wpmLabel [expr {[llength $::wpmLog2]/5}]
-    #updateBar wpmMeter3 3 [expr {$::wpmLabel / 100.0}]
-}
-
-proc recomputeLWPM {{timestamp -1}} {
-    if {$timestamp == -1} {set timestamp [clock milliseconds]}
-    set limit [expr {$timestamp - 12000}]
-    for {set i 0} {$i < [llength $::wpmLog]} {incr i} {
-        if {[lindex $::wpmLog $i] < $limit} {
-            set ::wpmLog [lreplace $::wpmLog $i $i]
-            incr i -1
-        } else {
-            break
-        }
-    }
-
-    set wpmLabel [llength $::wpmLog]
-    #updateBar wpmMeter2 2 [expr {$wpmLabel / 100.0}]
-}
-
-proc recomputeWPM {timestamp} {
-    set diff [expr $timestamp - $::lastPressTime]
-    set wpmLabel [expr {12000.0/$diff}]
-    #updateBar wpmMeter 1 [expr {$wpmLabel/100.0}]
-}
 
 proc updater {} {
     set diff [expr [clock milliseconds] - $::lastPressTime]
 
-    recomputeLWPM
     recomputeRhyme
-    recomputeLLWPM
-
-    computeCoolness
+    updateErrorBar
+    updateWpmBar
 
     after 50 updater
 }
 
 
-proc computeCoolness {} {
+proc updateErrorBar {} {
     set timestamp [clock milliseconds]
-    # fix this needless looping
-    for {set i 1} {$i < 80} {incr i} {
-        set j 0
-        for {} {$j < [llength $::wpmLog2]} {incr j} {
-            if {[lindex $::wpmLog2 $j] > [expr $timestamp - (1000*$i)]} {
-                break
-            }
+    set limit [expr $timestamp - 80*$::timeStep]
+    while {[llength $::lastErrors] > 0 && [lindex [lindex $::lastErrors 0] 0] < $limit} {
+        set ::lastErrors [lreplace $::lastErrors 0 0]
+    }
+
+    set j 0
+    for {set i 80} {$i > 0} {incr i -1} {
+        set limit [expr $timestamp - ($::timeStep*$i)]
+        for {} {$j < [llength $::lastErrors]} {incr j} {
+            if {[lindex [lindex $::lastErrors $j] 0] > $limit} {break}
         }
 
-        set wpmLabel [expr {([llength $::wpmLog2] - $j)/($i/12.0)}]
+        set temp [expr {([llength $::lastErrors] - $j)}]
+        updateErrorSubBar $i [expr {$temp / $::errorResolution}] $temp
+    }  
+}
 
-        updateBar "wpm[expr $i + 3]" [expr $i + 3] [expr {$wpmLabel / 100.0}] $wpmLabel
+
+proc updateWpmBar {} {
+    set timestamp [clock milliseconds]
+    set limit [expr $timestamp - 80*$::timeStep]
+    
+    while {[llength $::wpmLog2] > 0 && [lindex $::wpmLog2 0] < $limit} {
+        set ::wpmLog2 [lreplace $::wpmLog2 0 0]
+    }
+
+    set wpmLogLength [llength $::wpmLog2]
+    
+    set j 0
+    for {set i 79} {$i > 0} {incr i -1} {
+        set limit [expr $timestamp - ($::timeStep*$i)]
+        for {} {$j < $wpmLogLength} {incr j} {
+            if {[lindex $::wpmLog2 $j] > $limit} {break}
+        }
+
+        set wpmLabel [expr {($wpmLogLength - $j)*(1000/$::timeStep)/($i/12.0)}]
+
+        updateBar $i [expr {$wpmLabel / 100.0}] $wpmLabel
     }
 }
 
@@ -139,6 +139,13 @@ proc press {char} {
     set currentChar [string index $::textToType $::currntCharIndex]
 
     if {$char == $currentChar || ($currentChar == "\n" && [string trim $char] == "")} {
+        if {!$::lastPressWasError} {
+            .t tag add green "1.0 + $::currntCharIndex char" "1.1 + $::currntCharIndex char"
+        } else {
+            set ::lastPressWasError false
+            .t tag add red "1.0 + $::currntCharIndex char" "1.1 + $::currntCharIndex char"
+        }
+
         setGreen
         incr ::currntCharIndex
         if {$::lastCharPressed != -1} {
@@ -149,7 +156,6 @@ proc press {char} {
             lappend ::wpmLog2 $pressTime
 
             recomputeRhyme $diff
-            recomputeWPM $pressTime
             
             set rh [open rhyme.txt "a+"]
             puts $rh "$char,$diff"
@@ -165,8 +171,14 @@ proc press {char} {
         puts $fh "\"$currentChar\",\"$char\""
         close $fh
 
+        lappend ::lastErrors [list $pressTime $currentChar]
+        
+
+
+        set ::lastPressWasError true
+
         incr ::errors
-        .t configure -background "red"
+        .t configure -background "orange"
     }
 }
 
@@ -194,7 +206,6 @@ proc save {} {
 }
 
 
-set currntCharIndex [lindex $argv 0]
 set errors 0
 
 set lastPressTime -1
@@ -209,23 +220,23 @@ set wpmLabel 0
 set lastDelay 0
 set wpmLog ""
 set wpmLog2 ""
+set lastErrors ""
+set delayDiffs ""
+
+set rhymeBarRight ""
+set rhymeBarLeft ""
+
+set ::lastPressWasError false
 
 text .t -width 50 -height 30
 canvas .c -background black -width $sideBarWidth -height $sideBarHeight
 canvas .c2 -background black -width $sideBarWidth -height $sideBarHeight
-
+canvas .c3 -background black -width 1000 -height 100
 
 grid .c .t .c2
-#grid columnconfigure . {0 1 2}
+grid .c3 -columnspan 3
 
-label .wpm -textvariable wpmLabel
-
-
-
-#updateBar rhymeMeter 0 0.5
-#updateBar wpmMeter 1 0.5
-#updateBar wpmMeter2 2 0.5
-#updateBar wpmMeter3 3 0.5
+label .wpm -textvariable wpmLabel 
 
 .t insert 1.0 $textToType
 .t configure -state disable
@@ -233,11 +244,10 @@ label .wpm -textvariable wpmLabel
 .t tag add green 1.0 1.0
 .t tag configure yellow -background "yellow"
 .t tag configure green -background "green"
+.t tag configure red -background "dark green"
 .t tag raise green
 
 
-setGreen
-incr ::currntCharIndex
 
 
 foreach char [list Return space Key-minus Key-_ Key-0 Key-1 Key-2 Key-3 Key-4 Key-5 Key-1 6 7 8 9 ! @ # $ % ^ & * ? = + ' , . p y f g c r l a o e u i d h t n \; : q j k x b m w v z P Y F G C R L A O E U I D H T N S Q J K X B M W V Z S s ( )] {
@@ -246,4 +256,12 @@ foreach char [list Return space Key-minus Key-_ Key-0 Key-1 Key-2 Key-3 Key-4 Ke
 
 bind . <Control-q> {save}
 
+if {[llength $argv] != 1} {
+    set currntCharIndex -1
+} else {
+    set currntCharIndex [lindex $argv 0]
+    setGreen
+}
+
+incr ::currntCharIndex
 updater
