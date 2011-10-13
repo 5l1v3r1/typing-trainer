@@ -8,19 +8,15 @@ set sideBarWidth 300
 
 for {set i 0} {$i < 81} {incr i} {
     set count [expr 6*$i]
-    lappend bars  [list $count "green" 6]
+    lappend bars  [list $count "green" 6 "wpmBar$i" "wpmLabel$i" "w" ".c"]
+    lappend bars2  [list $count "red" 6 "errorBar$i" "errorLabel$i" "e" ".c2"]
 }
-
-for {set i 0} {$i < 81} {incr i} {
-    set count [expr 6*$i]
-    lappend bars2  [list $count "red" 6]
-}
-
 
 proc updateBar {barNumber percent lbl} {
     lassign [lindex $::bars $barNumber] y color h
     .c delete  "wpmBar$barNumber"
     .c create rectangle [expr {$::sideBarWidth - 1}] $y [expr {$::sideBarWidth - int($percent * $::sideBarWidth)}] [expr {$y + $h}] -fill $color -tags "wpmBar$barNumber"
+
 
     if {[expr {$barNumber % 10}] == 0} {
         catch {.c delete "wpmLabel$barNumber"}
@@ -34,11 +30,10 @@ proc updateErrorSubBar {barNumber percent lbl} {
     .c2 create rectangle 0 $y [expr {int(1.0 * $percent * $::sideBarWidth)}] [expr {$y + $h}] -fill $color -tags "errorBar$barNumber"
     if {[expr {$barNumber % 10}] == 0} {
         catch {.c2 delete "errorLabel$barNumber"} 
+
         .c2 create text [expr $::sideBarWidth - 5]  [expr {$y + $h/2}] -text [expr {int($lbl)}] -tags "wpmLabel$barNumber" -fill white -font "Arial 14" -anchor e -tags "errorLabel$barNumber"
     }
 }
-
-
 
 proc setGreen {} {
     .t tag add yellow "1.1 + $::currntCharIndex char" "1.2 + $::currntCharIndex char"
@@ -71,11 +66,8 @@ proc recomputeRhyme {{in -1}} {
         set ::delayDiffs [lreplace $::delayDiffs end end]
     }
 
-    .c3 delete $::rhymeBarRight
-    .c3 delete $::rhymeBarLeft
-    set ::rhymeBarRight [.c3 create rectangle 500 25 [expr {500 + $::rhyme / 2}] 75 -fill "yellow"]
-    set ::rhymeBarLeft [.c3 create rectangle 500 25 [expr {500 - $::rhyme / 2}] 75 -fill "yellow"]
-    
+    .c3 delete $::rhymeBar
+    set ::rhymeBar [.c3 create rectangle [expr {500 - $::rhyme / 2}] 65 [expr {500 + $::rhyme / 2}] 60 -fill "yellow"]
 }
 
 
@@ -86,7 +78,7 @@ proc updater {} {
     updateErrorBar
     updateWpmBar
 
-    after 50 updater
+    after 100 updater
 }
 
 
@@ -106,7 +98,7 @@ proc updateErrorBar {} {
 
         set temp [expr {([llength $::lastErrors] - $j)}]
         updateErrorSubBar $i [expr {$temp / $::errorResolution}] $temp
-    }  
+    }
 }
 
 
@@ -114,21 +106,25 @@ proc updateWpmBar {} {
     set timestamp [clock milliseconds]
     set limit [expr $timestamp - 80*$::timeStep]
     
-    while {[llength $::wpmLog2] > 0 && [lindex $::wpmLog2 0] < $limit} {
-        set ::wpmLog2 [lreplace $::wpmLog2 0 0]
+    while {[llength $::wpmLog] > 0 && [lindex $::wpmLog 0] < $limit} {
+        set ::wpmLog [lreplace $::wpmLog 0 0]
     }
 
-    set wpmLogLength [llength $::wpmLog2]
+    set wpmLogLength [llength $::wpmLog]
     
     set j 0
     for {set i 79} {$i > 0} {incr i -1} {
         set limit [expr $timestamp - ($::timeStep*$i)]
         for {} {$j < $wpmLogLength} {incr j} {
-            if {[lindex $::wpmLog2 $j] > $limit} {break}
+            if {[lindex $::wpmLog $j] > $limit} {break}
         }
+
 
         set wpmLabel [expr {($wpmLogLength - $j)*(1000/$::timeStep)/($i/12.0)}]
 
+        if {[expr {$::timeStep * $i}] == 10000} {
+            .c3 itemconfigure $::speedLabel -text "[expr {int($wpmLabel)}] WPM"
+        }
         updateBar $i [expr {$wpmLabel / 100.0}] $wpmLabel
     }
 }
@@ -139,12 +135,16 @@ proc press {char} {
     set currentChar [string index $::textToType $::currntCharIndex]
 
     if {$char == $currentChar || ($currentChar == "\n" && [string trim $char] == "")} {
+        incr ::total
         if {!$::lastPressWasError} {
             .t tag add green "1.0 + $::currntCharIndex char" "1.1 + $::currntCharIndex char"
+            incr ::correct
         } else {
             set ::lastPressWasError false
             .t tag add red "1.0 + $::currntCharIndex char" "1.1 + $::currntCharIndex char"
+
         }
+        .c3 itemconfigure $::accuracyLabel -text "[expr {int((100.0 * $::correct) / $::total)}]%"
 
         setGreen
         incr ::currntCharIndex
@@ -153,7 +153,6 @@ proc press {char} {
             lappend ::pairs($::lastCharPressed$char) $diff 
             lappend ::singles($char) $diff
             lappend ::wpmLog $pressTime
-            lappend ::wpmLog2 $pressTime
 
             recomputeRhyme $diff
             
@@ -172,8 +171,9 @@ proc press {char} {
         close $fh
 
         lappend ::lastErrors [list $pressTime $currentChar]
-        
-
+       
+        incr ::total
+        .c3 itemconfigure $::accuracyLabel -text "[expr {int((100.0 * $::correct) / $::total)}]%"
 
         set ::lastPressWasError true
 
@@ -208,6 +208,9 @@ proc save {} {
 
 set errors 0
 
+set correct 0
+set total 0
+
 set lastPressTime -1
 set lastCharPressed -1
 
@@ -216,27 +219,23 @@ set textToType [read $fh]
 close $fh
 
 set rhyme 0
-set wpmLabel 0
 set lastDelay 0
 set wpmLog ""
-set wpmLog2 ""
 set lastErrors ""
 set delayDiffs ""
 
-set rhymeBarRight ""
-set rhymeBarLeft ""
+set rhymeBar ""
 
 set ::lastPressWasError false
 
 text .t -width 50 -height 30
 canvas .c -background black -width $sideBarWidth -height $sideBarHeight
 canvas .c2 -background black -width $sideBarWidth -height $sideBarHeight
-canvas .c3 -background black -width 1000 -height 100
+canvas .c3 -background black -width 1000 -height 70
 
 grid .c .t .c2
 grid .c3 -columnspan 3
 
-label .wpm -textvariable wpmLabel 
 
 .t insert 1.0 $textToType
 .t configure -state disable
@@ -247,7 +246,8 @@ label .wpm -textvariable wpmLabel
 .t tag configure red -background "dark green"
 .t tag raise green
 
-
+set accuracyLabel [.c3 create text [expr {1000 - $sideBarWidth}] 0 -anchor ne -text "100%" -fill white -font "Arial 20"]
+set speedLabel [.c3 create text $sideBarWidth 0 -anchor nw -text "0 WPM" -fill white -font "Arial 20"]
 
 
 foreach char [list Return space Key-minus Key-_ Key-0 Key-1 Key-2 Key-3 Key-4 Key-5 Key-1 6 7 8 9 ! @ # $ % ^ & * ? = + ' , . p y f g c r l a o e u i d h t n \; : q j k x b m w v z P Y F G C R L A O E U I D H T N S Q J K X B M W V Z S s ( )] {
@@ -265,3 +265,5 @@ if {[llength $argv] != 1} {
 
 incr ::currntCharIndex
 updater
+
+
